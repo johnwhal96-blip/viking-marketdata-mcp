@@ -1,0 +1,44 @@
+from mcp.shared.memory import create_connected_server_and_client_session
+
+from app import main
+
+
+async def test_mcp_lists_expected_tools():
+    async with create_connected_server_and_client_session(main.mcp, raise_exceptions=True) as session:
+        result = await session.list_tools()
+    assert {tool.name for tool in result.tools} == {
+        "list_available_portfolios",
+        "get_portfolio_data",
+    }
+
+
+async def test_mcp_portfolio_tool_returns_structured_content(monkeypatch):
+    async def fake_list_available_portfolios(*, history_only: bool):
+        return {
+            "count": 1,
+            "history_only": history_only,
+            "portfolios": [
+                {
+                    "robot_id": "1",
+                    "portfolio": "demo",
+                    "owner": "owner@example.com",
+                    "history_available": True,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        main.service,
+        "list_available_portfolios",
+        fake_list_available_portfolios,
+    )
+
+    async with create_connected_server_and_client_session(main.mcp, raise_exceptions=True) as session:
+        result = await session.call_tool(
+            "list_available_portfolios",
+            {"history_only": True},
+        )
+
+    assert result.isError is False
+    assert result.structuredContent["count"] == 1
+    assert result.structuredContent["portfolios"][0]["portfolio"] == "demo"
