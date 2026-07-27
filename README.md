@@ -2,7 +2,7 @@
 
 Публичный read-only MCP-сервер поверх WebSocket API `bot.fkviking.com`.
 
-Он предоставляет 23 инструмента:
+Он предоставляет 22 инструмента:
 
 - `list_available_portfolios` — доступные пользователю портфели;
 - `subscribe_available_portfolios` — подписка на изменения списка портфелей;
