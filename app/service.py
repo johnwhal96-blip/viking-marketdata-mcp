@@ -14,7 +14,7 @@ from app.response_v2 import (
     portfolio_not_found,
     sanitize_value,
 )
-from app.viking_client import VikingClient
+from app.viking_client import VikingAPIError, VikingClient
 
 Aggregation = Literal["raw", "10s", "1m", "5m", "10m", "1h", "6h", "24h"]
 Delivery = Literal["auto", "inline", "file", "stream", "summary"]
@@ -139,14 +139,20 @@ class MarketDataService:
         portfolio: str,
         raw: bool = False,
     ) -> dict[str, Any]:
-        portfolios = await self.client.list_portfolios()
-        not_found = portfolio_not_found(portfolios, robot_id, portfolio)
-        if not_found is not None:
-            return not_found
-        result = await self.client.get_current_portfolio_data(
-            robot_id=robot_id,
-            portfolio=portfolio,
-        )
+        try:
+            result = await self.client.get_current_portfolio_data(
+                robot_id=robot_id,
+                portfolio=portfolio,
+            )
+        except VikingAPIError as exc:
+            try:
+                portfolios = await self.client.list_portfolios()
+            except Exception as diagnostic_exc:
+                raise exc from diagnostic_exc
+            not_found = portfolio_not_found(portfolios, robot_id, portfolio)
+            if not_found is not None:
+                return not_found
+            raise
         value = sanitize_value(result["value"])
         response = envelope(
             [value],
