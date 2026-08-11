@@ -78,164 +78,91 @@ async def test_grouped_current_portfolio_reads_use_max_50_messages():
     assert client._subscriptions == {}
 
 
-async def test_robot_portfolio_summary_uses_documented_counters():
+async def test_robot_summary_uses_re_even_when_disabled_counter_disagrees():
     client = object.__new__(VikingClient)
-    client._subscriptions = {"robot-sub": object()}
+    client._subscriptions = {"sub": object()}
     client._subscribe = AsyncMock(
         return_value={
             "type": "robot.subscribe",
-            "eid": "robot-sub",
+            "eid": "sub",
             "ts": 1,
             "r": "s",
             "data": {
                 "r_id": "998",
-                "value": {"p_a": 126, "p_d": 20, "p_e": 3, "tr": 2},
+                "value": {
+                    "p_a": 2,
+                    "p_d": 2,
+                    "p_e": 0,
+                    "tr": 2,
+                    "re": [
+                        {"n": "alpha", "f": True, "re": True},
+                        {"n": "beta", "f": True, "re": False},
+                    ],
+                },
             },
         }
     )
     client._unsubscribe_log_subscription = AsyncMock(return_value={"unsubscribed": True})
     client.close = AsyncMock()
-
     result = await client.get_robot_portfolio_summary(robot_id="998")
-
-    assert result["all_portfolios"] == 126
-    assert result["disabled_portfolios"] == 20
-    assert result["enabled_portfolios"] == 106
-    assert result["expired_portfolios"] == 3
-    assert result["robot_trading"] is True
-    client._unsubscribe_log_subscription.assert_awaited_once_with(
-        "robot-sub",
-        expected_subscribe_type="robot.subscribe",
-        unsubscribe_type="robot.unsubscribe",
-    )
+    assert result["disabled_portfolios"] == 2
+    assert result["trading_portfolios"] == 1
+    assert result["portfolio_statuses"][0]["status"] == "trading"
+    assert result["portfolio_statuses"][0]["re"] is True
 
 
 def _service(tmp_path, client):
     settings = Settings(
-        export_dir=tmp_path,
-        public_base_url="https://example.test",
-        export_signing_key="test-signing-key",
+        export_dir=tmp_path, public_base_url="https://example.test", export_signing_key="test"
     )
     return MarketDataService(settings, client, ExportStore(settings))
 
 
-async def test_status_summary_avoids_portfolio_fanout_when_all_are_accessible(tmp_path):
+async def test_service_returns_all_re_statuses_without_fanout(tmp_path):
     client = SimpleNamespace(
         get_robot_portfolio_summary=AsyncMock(
             return_value={
                 "all_portfolios": 2,
-                "disabled_portfolios": 1,
-                "enabled_portfolios": 1,
+                "disabled_portfolios": 2,
                 "expired_portfolios": 0,
                 "robot_trading_status": 2,
                 "robot_trading": True,
+                "portfolio_status_count": 2,
+                "trading_portfolios": 1,
+                "not_trading_portfolios": 1,
+                "portfolio_statuses": [
+                    {"portfolio": "alpha", "trading": True, "status": "trading", "re": True, "f": True},
+                    {"portfolio": "beta", "trading": False, "status": "not_trading", "re": False, "f": True},
+                ],
             }
-        ),
-        list_available_portfolios_basic=AsyncMock(
-            return_value=[
-                {"robot_id": "998", "portfolio": "A", "owner": "one@example.com"},
-                {"robot_id": "998", "portfolio": "B", "owner": "two@example.com"},
-            ]
-        ),
-        get_current_portfolio_data_many=AsyncMock(),
+        )
     )
-
-    result = await _service(tmp_path, client).get_robot_portfolio_trading_status(
-        robot_id="998"
-    )
-
-    assert result["accessible_total_count"] == 2
-    assert result["accessible_enabled_count"] == 1
-    assert result["accessible_disabled_count"] == 1
-    assert result["accessible_unknown_count"] == 0
-    assert result["detail_source"] == "robot.subscribe.p_a/p_d"
-    client.get_current_portfolio_data_many.assert_not_awaited()
+    result = await _service(tmp_path, client).get_robot_portfolio_trading_status(robot_id="998")
+    assert result["detail_source"] == "robot.subscribe.value.re"
+    assert result["per_portfolio_reads"] == 0
+    assert [x["status"] for x in result["items"]] == ["trading", "not_trading"]
 
 
-async def test_status_details_batch_and_filter_enabled_portfolios(tmp_path):
+async def test_trading_only_filters_re_true(tmp_path):
     client = SimpleNamespace(
         get_robot_portfolio_summary=AsyncMock(
             return_value={
-                "all_portfolios": 3,
-                "disabled_portfolios": 1,
-                "enabled_portfolios": 2,
+                "all_portfolios": 2,
+                "disabled_portfolios": 0,
                 "expired_portfolios": 0,
                 "robot_trading_status": 2,
                 "robot_trading": True,
-            }
-        ),
-        list_available_portfolios_basic=AsyncMock(
-            return_value=[
-                {"robot_id": "998", "portfolio": "A", "owner": "one@example.com"},
-                {"robot_id": "998", "portfolio": "B", "owner": "two@example.com"},
-                {"robot_id": "998", "portfolio": "C", "owner": "three@example.com"},
-            ]
-        ),
-        get_current_portfolio_data_many=AsyncMock(
-            return_value={
-                "items": [
-                    {"portfolio": "A", "ok": True, "value": {"disabled": False}},
-                    {"portfolio": "B", "ok": True, "value": {"disabled": True}},
-                    {"portfolio": "C", "ok": True, "value": {}},
+                "portfolio_status_count": 2,
+                "trading_portfolios": 1,
+                "not_trading_portfolios": 1,
+                "portfolio_statuses": [
+                    {"portfolio": "alpha", "trading": True, "status": "trading", "re": True, "f": True},
+                    {"portfolio": "beta", "trading": False, "status": "not_trading", "re": False, "f": True},
                 ],
-                "cleanup_reconnected": False,
             }
-        ),
+        )
     )
-
     result = await _service(tmp_path, client).get_robot_portfolio_trading_status(
-        robot_id="998",
-        include_items=True,
-        enabled_only=True,
+        robot_id="998", trading_only=True
     )
-
-    assert result["data_status"] == "partially_available"
-    assert result["accessible_enabled_count"] == 1
-    assert result["accessible_disabled_count"] == 1
-    assert result["accessible_unknown_count"] == 1
-    assert [item["portfolio"] for item in result["items"]] == ["A"]
-    client.get_current_portfolio_data_many.assert_awaited_once_with(
-        robot_id="998",
-        portfolios=["A", "B", "C"],
-    )
-
-
-async def test_partial_access_scans_even_for_count_only(tmp_path):
-    client = SimpleNamespace(
-        get_robot_portfolio_summary=AsyncMock(
-            return_value={
-                "all_portfolios": 3,
-                "disabled_portfolios": 1,
-                "enabled_portfolios": 2,
-                "expired_portfolios": 0,
-                "robot_trading_status": 2,
-                "robot_trading": True,
-            }
-        ),
-        list_available_portfolios_basic=AsyncMock(
-            return_value=[
-                {"robot_id": "998", "portfolio": "A", "owner": "one@example.com"},
-                {"robot_id": "998", "portfolio": "B", "owner": "two@example.com"},
-            ]
-        ),
-        get_current_portfolio_data_many=AsyncMock(
-            return_value={
-                "items": [
-                    {"portfolio": "A", "ok": True, "value": {"disabled": False}},
-                    {"portfolio": "B", "ok": True, "value": {"disabled": True}},
-                ],
-                "cleanup_reconnected": False,
-            }
-        ),
-    )
-
-    result = await _service(tmp_path, client).get_robot_portfolio_trading_status(
-        robot_id="998"
-    )
-
-    assert result["items"] == []
-    assert result["accessible_total_count"] == 2
-    assert result["accessible_enabled_count"] == 1
-    assert result["accessible_disabled_count"] == 1
-    assert result["robot_total_count"] == 3
-    assert result["detail_source"] == "batched portfolio.subscribe"
+    assert [x["portfolio"] for x in result["items"]] == ["alpha"]
