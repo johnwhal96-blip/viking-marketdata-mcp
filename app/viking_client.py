@@ -927,6 +927,88 @@ class VikingClient:
             "logs": logs,
         }
 
+    async def get_messages_history(
+        self,
+        *,
+        mint_ms: int,
+        maxt_ms: int,
+        read: bool = False,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Return non-suppressible platform messages in an inclusive epoch-millisecond range.
+
+        Calls ``messages.get_history`` (api.md 11.13.4). Messages are account-level: the
+        request has no robot or portfolio identifiers. ``msg`` doubles as the unique id.
+        """
+        self._validate_epoch_msec_bound(mint_ms, "mint_ms")
+        self._validate_epoch_msec_bound(maxt_ms, "maxt_ms")
+        if mint_ms > maxt_ms:
+            raise ValueError("mint_ms must not be later than maxt_ms")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be in range 1..100")
+
+        request_data: dict[str, Any] = {
+            "mint": mint_ms,
+            "maxt": maxt_ms,
+            "lim": limit,
+        }
+        if read:
+            request_data["read"] = True
+
+        response = await self.request("messages.get_history", request_data)
+        result = self._required_str(response, "r")
+        if result != "p":
+            raise VikingProtocolError("messages.get_history returned an unexpected result; expected r='p'")
+        data = self._required_dict(response, "data")
+        messages = self._parse_message_rows(data.get("values"))
+        normalized_data = dict(data)
+        normalized_data["values"] = messages
+        count = data.get("count")
+        if count is not None and (not isinstance(count, int) or isinstance(count, bool)):
+            raise VikingProtocolError("Response field 'count' must be an integer when present")
+        return {
+            "type": self._required_str(response, "type"),
+            "eid": self._required_str(response, "eid"),
+            "ts": self._required_int(response, "ts"),
+            "r": result,
+            "result": result,
+            "data": normalized_data,
+            "mint": mint_ms,
+            "maxt": maxt_ms,
+            "read": read,
+            "limit": limit,
+            "count": count,
+            "message_count": len(messages),
+            "messages": messages,
+        }
+
+    def _parse_message_rows(self, values: Any) -> list[dict[str, Any]]:
+        """Validate ``messages.*`` rows: ``msg`` is required, ``st``/``dt`` are kept as received."""
+        if values is None:
+            return []
+        if not isinstance(values, list):
+            raise VikingProtocolError("Response field 'values' must be an array")
+        rows: list[dict[str, Any]] = []
+        for item in values:
+            if not isinstance(item, dict):
+                raise VikingProtocolError("Each message must be an object")
+            msg = item.get("msg")
+            if not isinstance(msg, str) or not msg:
+                raise VikingProtocolError("Message field 'msg' must be a non-empty string")
+            state = item.get("st")
+            if state is not None and (isinstance(state, bool) or state not in (0, 1)):
+                raise VikingProtocolError("Message field 'st' must be 0 or 1 when present")
+            dt = item.get("dt")
+            if dt is not None and not (
+                (isinstance(dt, int) and not isinstance(dt, bool) and dt >= 0)
+                or (isinstance(dt, str) and dt.isdigit())
+            ):
+                raise VikingProtocolError(
+                    "Message field 'dt' must be a non-negative epoch_msec integer or digit string"
+                )
+            rows.append(dict(item))
+        return rows
+
     async def subscribe_portfolio_deals(self, *, robot_id: str, portfolio: str) -> dict[str, Any]:
         """Subscribe to portfolio deals and return the initial snapshot."""
         if not robot_id:
@@ -2463,6 +2545,11 @@ class VikingClient:
     def _validate_epoch_nsec_bound(value: str, field_name: str) -> None:
         if not isinstance(value, str) or not value.isdigit():
             raise ValueError(f"{field_name} must be an epoch_nsec digit string")
+
+    @staticmethod
+    def _validate_epoch_msec_bound(value: int, field_name: str) -> None:
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"{field_name} must be a non-negative epoch_msec integer")
 
     @staticmethod
     def decode_messages(raw_message: str | bytes) -> list[dict[str, Any]]:

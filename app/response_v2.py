@@ -48,6 +48,35 @@ def epoch_ns_to_iso(value: Any, timezone: str) -> str | None:
     return dt.isoformat(timespec="milliseconds")
 
 
+def epoch_ms_to_iso(value: Any, timezone: str) -> str | None:
+    """Format an ``epoch_msec`` value (messages.* ``dt``) — not to be confused with ``epoch_nsec``."""
+    if value is None:
+        return None
+    try:
+        ms = int(value)
+        tz = ZoneInfo(timezone)
+    except (TypeError, ValueError, OverflowError, KeyError) as exc:
+        raise ValueError(
+            f"Invalid epoch milliseconds or timezone: {value!r}, {timezone!r}"
+        ) from exc
+    seconds, remainder = divmod(ms, 1_000)
+    dt = datetime.fromtimestamp(seconds, tz=tz).replace(microsecond=remainder * 1_000)
+    return dt.isoformat(timespec="milliseconds")
+
+
+def compact_message(row: dict[str, Any], timezone: str) -> dict[str, Any]:
+    """Present a ``messages.*`` row with a readable state and ISO time; keeps every original field."""
+    result = dict(sanitize_value(row))
+    state = result.get("st")
+    if state == 0:
+        result["state"] = "unread"
+    elif state == 1:
+        result["state"] = "read"
+    if result.get("dt") is not None:
+        result["dt_iso"] = epoch_ms_to_iso(result["dt"], timezone)
+    return result
+
+
 def add_iso_times(value: Any, timezone: str) -> Any:
     value = sanitize_value(value)
     if isinstance(value, list):
