@@ -23,7 +23,7 @@ Production MCP:
 - health: `https://viking-marketdata-mcp-production.up.railway.app/health`;
 - setup: `https://viking-marketdata-mcp-production.up.railway.app/setup`.
 
-В актуальной версии реализованы 42 MCP-инструмента. Сервер
+В актуальной версии реализованы 45 MCP-инструментов. Сервер
 только читает данные: он не создаёт и не изменяет портфели, не меняет поля, не
 отправляет торговые сигналы и заявки.
 
@@ -203,7 +203,7 @@ Viking credentials в Railway environment и не возвращайте ста�
 
 ## 6. Реально используемые методы Viking WebSocket API
 
-Сейчас реализовано 35 типов операций Viking:
+Сейчас реализовано 36 типов операций Viking:
 
 | Viking API `type` | Назначение | Где используется |
 |---|---|---|
@@ -220,6 +220,7 @@ Viking credentials в Railway environment и не возвращайте ста�
 | `robot_logs.subscribe` | Snapshot и новые записи логов робота | subscribe/get robot log updates |
 | `robot_logs.unsubscribe` | Завершение подписки на логи робота | unsubscribe robot logs |
 | `robot_logs.get_history` | История логов робота в диапазоне `epoch_nsec` | `get_robot_log_history` |
+| `messages.get_history` | Неподавляемые сообщения платформы в диапазоне `epoch_msec` | `get_messages_history` |
 | `portfolio_deals.subscribe` | Snapshot и новые сделки портфеля по инструментам | subscribe/get portfolio deal updates |
 | `portfolio_deals.unsubscribe` | Завершение подписки на сделки | unsubscribe portfolio deals |
 | `portfolio_deals.get_previous` | До 100 сделок старше `mt` | `get_previous_portfolio_deals` |
@@ -432,6 +433,29 @@ limit=100000)`:
 - сохраняет дополнительные поля без фильтрации;
 - принимает `dt` как integer или digit string, потому что таблица и официальный
   JSON-пример расходятся по JSON-типу.
+
+`get_messages_history(date_from, date_to, include_read=False, limit=100,
+timezone="Europe/Moscow", raw=False)`:
+
+- вызывает `messages.get_history` (api.md 11.13.4 «Request Message History 2»);
+- это сообщения уровня учётной записи: в запросе нет `r_id`/`p_id`, и они не
+  попадают в `robot_logs.*` — плановый перезапуск робота виден только здесь;
+- требует ISO 8601 даты с часовым поясом и `date_from <= date_to` (границы
+  у API включительные);
+- преобразует границы в целые `mint`/`maxt` формата `epoch_msec` — не
+  `epoch_nsec`, как у логов;
+- отправляет `read=true` только при `include_read=True`; по умолчанию Viking
+  возвращает лишь непрочитанные;
+- принимает `limit` от 1 до 100 — предел самого API;
+- требует непустой строковый `msg` в каждой строке (это и текст, и уникальный
+  ключ), `st` только 0/1, `dt` как integer или digit string; остальные поля
+  сохраняются без фильтрации;
+- `count` в ответе необязателен: таблица контракта называет его обязательным,
+  а JSON-пример 11.13.4 его не содержит;
+- в примере запроса 11.13.4 официальной документации фигурируют `mt`/`lim`
+  (скопировано из `get_previous`), реализация следует таблице: `mint`/`maxt`;
+- `messages.subscribe`, `messages.get_previous` и write-операция
+  `messages.mark_as_read` не реализованы.
 
 Viking фильтрует видимые логи по автору записи и авторизованным email/role.
 При удалении портфеля или робота сервер Viking автоматически отписывает клиента.

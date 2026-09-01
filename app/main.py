@@ -67,7 +67,9 @@ mcp = FastMCP(
         "Для новых логов портфеля используй subscribe_portfolio_logs, "
         "get_portfolio_log_updates и unsubscribe_portfolio_logs. Для логов робота используй "
         "subscribe_robot_logs, get_robot_log_updates и unsubscribe_robot_logs; историю логов "
-        "получай через get_robot_log_history. "
+        "получай через get_robot_log_history. Логи робота не содержат уведомлений платформы "
+        "(плановые перезапуски, объявления) — их отдаёт get_messages_history; для вопросов "
+        "«что будет с роботом», «есть ли уведомления» используй его, а не логи. "
         "Для сделок отдельных инструментов портфеля используй subscribe_portfolio_deals, "
         "get_portfolio_deal_updates и unsubscribe_portfolio_deals; доступные инструменты "
         "получай через get_portfolio_deal_sec_keys, историю — через "
@@ -758,6 +760,53 @@ async def get_robot_log_history(
         ],
         structuredContent=result,
     )
+
+
+@mcp.tool(
+    title="История сообщений платформы",
+    description=(
+        "Вызывает Viking messages.get_history — неподавляемые сообщения платформы, которые "
+        "показываются во вкладке Notifications интерфейса робота: плановые перезапуски роботов, "
+        "объявления. Они относятся к учётной записи, а не к роботу или портфелю, и в "
+        "get_robot_log_history не попадают. date_from/date_to — ISO 8601 с часовым поясом, "
+        "включительно, преобразуются в epoch_msec. По умолчанию Viking отдаёт только "
+        "непрочитанные; include_read=true добавляет прочитанные. limit от 1 до 100. "
+        "Поле msg — текст сообщения и одновременно его уникальный ключ."
+    ),
+    annotations=READ_ONLY,
+)
+async def get_messages_history(
+    date_from: Annotated[datetime, Field(description="Начало периода с часовым поясом")],
+    date_to: Annotated[datetime, Field(description="Конец периода с часовым поясом")],
+    include_read: Annotated[
+        bool, Field(description="Показывать и прочитанные сообщения (Viking read=true)")
+    ] = False,
+    limit: Annotated[int, Field(ge=1, le=100)] = 100,
+    timezone: str = "Europe/Moscow",
+    raw: bool = False,
+) -> CallToolResult:
+    try:
+        result = await _service_for_request().get_messages_history(
+            date_from=date_from,
+            date_to=date_to,
+            include_read=include_read,
+            limit=limit,
+            timezone=timezone,
+            raw=raw,
+        )
+    except SUBSCRIPTION_ERRORS as exc:
+        logger.warning("Messages history request failed: %s", exc)
+        return _error_result(exc)
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=f"Получено сообщений платформы: {result['row_count']}.",
+            )
+        ],
+        structuredContent=result,
+    )
+
 
 @mcp.tool(
     title="Подписаться на сделки портфеля",

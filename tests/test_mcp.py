@@ -26,6 +26,7 @@ async def test_mcp_lists_expected_tools():
         "get_robot_log_updates",
         "unsubscribe_robot_logs",
         "get_robot_log_history",
+        "get_messages_history",
         "subscribe_portfolio_deals",
         "get_portfolio_deal_updates",
         "unsubscribe_portfolio_deals",
@@ -73,6 +74,11 @@ async def test_mcp_lists_expected_tools():
     assert tools["get_robot_log_updates"].annotations.idempotentHint is False
     assert tools["unsubscribe_robot_logs"].annotations.idempotentHint is False
     assert tools["get_robot_log_history"].annotations.idempotentHint is True
+    assert tools["get_messages_history"].annotations.idempotentHint is True
+    assert tools["get_messages_history"].annotations.readOnlyHint is True
+    messages_schema = tools["get_messages_history"].inputSchema["properties"]
+    assert "include_read" in messages_schema
+    assert "robot_id" not in messages_schema
     assert tools["subscribe_portfolio_deals"].annotations.idempotentHint is False
     assert tools["get_portfolio_deal_updates"].annotations.idempotentHint is False
     assert tools["unsubscribe_portfolio_deals"].annotations.idempotentHint is False
@@ -335,3 +341,59 @@ async def test_mcp_robot_log_history_returns_structured_content(monkeypatch):
     assert result.isError is False
     assert result.structuredContent["row_count"] == 1
     assert result.structuredContent["verbosity"] == "compact"
+
+
+async def test_mcp_messages_history_returns_structured_content(monkeypatch):
+    class FakeService:
+        async def get_messages_history(
+            self,
+            *,
+            date_from,
+            date_to,
+            include_read=False,
+            limit=100,
+            timezone="Europe/Moscow",
+            raw=False,
+        ):
+            return {
+                "data_status": "ok",
+                "row_count": 1,
+                "truncated": False,
+                "coverage": {
+                    "from": date_from.isoformat(),
+                    "to": date_to.isoformat(),
+                    "tz": timezone,
+                },
+                "notes": [],
+                "include_read": include_read,
+                "count_in_database": 1,
+                "items": [
+                    {
+                        "st": 0,
+                        "state": "unread",
+                        "dt": 1788275520000,
+                        "dt_iso": "2026-09-01T18:12:00.000+03:00",
+                        "msg": "The robot 1381 will be restarted on Sep 02, 2026, at 06:05 Moscow time.",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(main, "_service_for_request", lambda: FakeService())
+
+    async with create_connected_server_and_client_session(
+        main.mcp, raise_exceptions=True
+    ) as session:
+        result = await session.call_tool(
+            "get_messages_history",
+            {
+                "date_from": "2026-09-01T00:00:00Z",
+                "date_to": "2026-09-02T00:00:00Z",
+                "include_read": True,
+                "limit": 20,
+            },
+        )
+
+    assert result.isError is False
+    assert result.structuredContent["row_count"] == 1
+    assert result.structuredContent["include_read"] is True
+    assert result.structuredContent["items"][0]["state"] == "unread"

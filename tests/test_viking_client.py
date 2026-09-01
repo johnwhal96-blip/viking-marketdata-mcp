@@ -1498,3 +1498,108 @@ async def test_find_security_sends_optional_scope_and_preserves_formula_details(
     assert result["portfolio_count"] == 1
     assert result["formula_match_count"] == 1
     assert result["formulas"][0]["field"] == "uf1"
+
+
+async def test_get_messages_history_sends_epoch_msec_and_preserves_rows():
+    client = object.__new__(VikingClient)
+    client.request = AsyncMock(
+        return_value={
+            "type": "messages.get_history",
+            "eid": "messages-request-1",
+            "ts": 906,
+            "r": "p",
+            "data": {
+                "count": 2,
+                "values": [
+                    {
+                        "st": 0,
+                        "dt": 1788275520000,
+                        "msg": "The robot 1381 will be restarted on Sep 02, 2026, at 06:05 Moscow time.",
+                        "dynamic": {"preserved": True},
+                    },
+                    {"st": 1, "dt": "1788166800000", "msg": "Test msg 2"},
+                ],
+            },
+        }
+    )
+
+    result = await client.get_messages_history(
+        mint_ms=1756600000000,
+        maxt_ms=1756800000000,
+        read=True,
+        limit=50,
+    )
+
+    client.request.assert_awaited_once_with(
+        "messages.get_history",
+        {"mint": 1756600000000, "maxt": 1756800000000, "lim": 50, "read": True},
+    )
+    assert result["result"] == "p"
+    assert result["count"] == 2
+    assert result["message_count"] == 2
+    assert result["messages"][0]["msg"].startswith("The robot 1381 will be restarted")
+    assert result["messages"][0]["dynamic"] == {"preserved": True}
+    assert result["messages"][1]["dt"] == "1788166800000"
+
+
+async def test_get_messages_history_omits_read_flag_by_default_and_accepts_missing_count():
+    client = object.__new__(VikingClient)
+    client.request = AsyncMock(
+        return_value={
+            "type": "messages.get_history",
+            "eid": "messages-request-2",
+            "ts": 907,
+            "r": "p",
+            "data": {"values": []},
+        }
+    )
+
+    result = await client.get_messages_history(mint_ms=1, maxt_ms=2)
+
+    client.request.assert_awaited_once_with(
+        "messages.get_history",
+        {"mint": 1, "maxt": 2, "lim": 100},
+    )
+    assert result["count"] is None
+    assert result["messages"] == []
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        "not-a-list",
+        [{"st": 0, "dt": 1}],
+        [{"msg": "", "st": 0}],
+        [{"msg": "x", "st": 2}],
+        [{"msg": "x", "st": True}],
+        [{"msg": "x", "dt": -5}],
+        [{"msg": "x", "dt": "12ab"}],
+    ],
+)
+async def test_get_messages_history_rejects_malformed_rows(values):
+    client = object.__new__(VikingClient)
+    client.request = AsyncMock(
+        return_value={
+            "type": "messages.get_history",
+            "eid": "messages-request-3",
+            "ts": 908,
+            "r": "p",
+            "data": {"values": values},
+        }
+    )
+
+    with pytest.raises(VikingProtocolError):
+        await client.get_messages_history(mint_ms=1, maxt_ms=2)
+
+
+async def test_get_messages_history_validates_arguments():
+    client = object.__new__(VikingClient)
+    client.request = AsyncMock()
+
+    with pytest.raises(ValueError, match="mint_ms must not be later"):
+        await client.get_messages_history(mint_ms=5, maxt_ms=4)
+    with pytest.raises(ValueError, match="limit"):
+        await client.get_messages_history(mint_ms=1, maxt_ms=2, limit=101)
+    with pytest.raises(ValueError, match="epoch_msec"):
+        await client.get_messages_history(mint_ms=-1, maxt_ms=2)
+    client.request.assert_not_awaited()
