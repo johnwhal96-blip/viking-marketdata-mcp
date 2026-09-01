@@ -73,6 +73,24 @@ class FakeClient:
             "logs": [{"msg": "test"}],
         }
 
+    async def get_messages_history(self, **kwargs):
+        return {
+            "mint": kwargs["mint_ms"],
+            "maxt": kwargs["maxt_ms"],
+            "read": kwargs["read"],
+            "limit": kwargs["limit"],
+            "count": 3,
+            "message_count": 2,
+            "messages": [
+                {
+                    "st": 0,
+                    "dt": 1788275520000,
+                    "msg": "The robot 1381 will be restarted on Sep 02, 2026, at 06:05 Moscow time.",
+                },
+                {"st": 1, "dt": "1788166800000", "msg": "Test msg 2"},
+            ],
+        }
+
 
 @pytest.fixture
 def service(tmp_path):
@@ -237,6 +255,54 @@ async def test_robot_log_history_rejects_reversed_dates(service):
             date_to=datetime(2026, 1, 1, tzinfo=UTC),
             message_filter=None,
             limit=100,
+        )
+
+
+async def test_messages_history_converts_dates_to_epoch_msec_and_formats_rows(service):
+    result = await service.get_messages_history(
+        date_from=datetime(2026, 9, 1, tzinfo=UTC),
+        date_to=datetime(2026, 9, 2, 0, 0, 0, 500000, tzinfo=UTC),
+        include_read=True,
+        limit=50,
+        timezone="Europe/Moscow",
+    )
+
+    assert result["data_status"] == "ok"
+    assert result["row_count"] == 2
+    assert result["include_read"] is True
+    assert result["count_in_database"] == 3
+    assert result["coverage"]["tz"] == "Europe/Moscow"
+    first, second = result["items"]
+    assert first["state"] == "unread"
+    assert first["dt_iso"] == "2026-09-01T18:12:00.000+03:00"
+    assert first["msg"].startswith("The robot 1381 will be restarted")
+    assert second["state"] == "read"
+    assert second["dt_iso"] == "2026-08-31T12:00:00.000+03:00"
+
+
+async def test_messages_history_passes_epoch_msec_bounds_to_client(service):
+    result = await service.get_messages_history(
+        date_from=datetime(2026, 9, 1, tzinfo=UTC),
+        date_to=datetime(2026, 9, 2, 0, 0, 0, 500000, tzinfo=UTC),
+        raw=True,
+    )
+
+    assert result["raw_response"]["mint"] == 1788220800000
+    assert result["raw_response"]["maxt"] == 1788307200500
+    assert result["raw_response"]["read"] is False
+    assert result["raw_response"]["limit"] == 100
+
+
+async def test_messages_history_rejects_reversed_dates_and_missing_timezone(service):
+    with pytest.raises(ValueError, match="later"):
+        await service.get_messages_history(
+            date_from=datetime(2026, 9, 2, tzinfo=UTC),
+            date_to=datetime(2026, 9, 1, tzinfo=UTC),
+        )
+    with pytest.raises(ValueError, match="timezone"):
+        await service.get_messages_history(
+            date_from=datetime(2026, 9, 1),
+            date_to=datetime(2026, 9, 2, tzinfo=UTC),
         )
 
 
