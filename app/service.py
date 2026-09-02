@@ -162,6 +162,14 @@ class MarketDataService:
                 "same_build compares rv with sv by common prefix: Viking truncates the "
                 "two strings to different lengths for one build (api.md example: rv "
                 "'ec1d046c', sv 'ec1d046').",
+                "server_build_differs is derived from rv vs sv only. api.md does not "
+                "state that a restart applies sv, so treat it as a signal that the "
+                "server build is not the one running, not as a promise about the next "
+                "restart.",
+                "This is a current-state snapshot: the fact and the time of a restart "
+                "are not derivable from it. mc is the current main-loop counter and is "
+                "comparable only against a value recorded earlier; use robot_logs and "
+                "get_messages_history for restart history.",
             ],
             robot_id=robot_id,
             connected=item.get("rc"),

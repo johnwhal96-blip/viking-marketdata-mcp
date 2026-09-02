@@ -131,7 +131,7 @@ def compact_robot_state(state: dict[str, Any], timezone: str) -> dict[str, Any]:
     result["server_version"] = result.get("sv")
     matches = same_build(result.get("rv"), result.get("sv"))
     result["same_build"] = matches
-    result["restart_updates_version"] = None if matches is None else not matches
+    result["server_build_differs"] = None if matches is None else not matches
     result["main_loop_counter"] = result.get("mc")
     if result.get("dt"):
         result["dt_iso"] = epoch_ms_to_iso(result["dt"], timezone)
