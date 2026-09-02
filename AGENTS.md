@@ -221,6 +221,7 @@ Viking credentials в Railway environment и не возвращайте ста�
 | `robot_logs.unsubscribe` | Завершение подписки на логи робота | unsubscribe robot logs |
 | `robot_logs.get_history` | История логов робота в диапазоне `epoch_nsec` | `get_robot_log_history` |
 | `messages.get_history` | Неподавляемые сообщения платформы в диапазоне `epoch_msec` | `get_messages_history` |
+| `robot.subscribe` | Состояние робота: подключение, версия, счётчик цикла | `get_robot_status` |
 | `portfolio_deals.subscribe` | Snapshot и новые сделки портфеля по инструментам | subscribe/get portfolio deal updates |
 | `portfolio_deals.unsubscribe` | Завершение подписки на сделки | unsubscribe portfolio deals |
 | `portfolio_deals.get_previous` | До 100 сделок старше `mt` | `get_previous_portfolio_deals` |
@@ -738,6 +739,15 @@ MCP-инструментов для snapshot/update lifecycle, пагинаци�
 
 - Fast-path invariant: `get_current_portfolio_data` must request the portfolio snapshot directly and must not call `list_portfolios()` before a successful read. The portfolio list may be fetched only after `VikingAPIError` to enrich an accessible-robot `portfolio_not_found` diagnostic; otherwise preserve the original Viking API error.
 
+
+## Robot state
+
+- `get_robot_status(robot_id, timezone="Europe/Moscow", raw=False)` отвечает на вопросы про робота как процесс: жив ли, какая версия, перезапускался ли, обновится ли версия при следующем рестарте.
+- Источник — тот же `robot.subscribe`, что и у статуса торговли: отдельного запроса нет, `value.re` в ответ не входит.
+- Версию робота не выводить из журнала: строка `Robot was started with version …` появляется только после очередного старта и говорит о прошлом, а не о текущем состоянии.
+- `same_build` сравнивает `rv` и `sv` по общему префиксу, а не на равенство: Viking обрезает строки до разной длины для одной сборки (пример из api.md — `rv` `"ec1d046c"`, `sv` `"ec1d046"`). Равенство дало бы ложное «версии разные».
+- `mc` (счётчик главного цикла) после рестарта считает с нуля — это независимый признак того, что робот перезапускался.
+- `rvd`/`svd` приходят в `epoch_sec`, `-1` означает «неизвестно»; `dt` — в `epoch_msec`, как у `messages.*`, а не в `epoch_nsec`, как у логов.
 
 ## Robot portfolio trading aggregate
 
