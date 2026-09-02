@@ -251,7 +251,7 @@ def test_compact_robot_state_decodes_statuses_and_times():
     assert state["market_data_status"] == "connecting"
     assert state["transaction_status"] == "closed_by_time"
     assert state["same_build"] is True
-    assert state["restart_updates_version"] is False
+    assert state["server_build_differs"] is False
     assert state["main_loop_counter"] == 42
     assert state["dt_iso"] == "2026-09-02T06:06:44.142+03:00"
     assert state["rvd_iso"].startswith("2026-09-02T")
@@ -259,16 +259,16 @@ def test_compact_robot_state_decodes_statuses_and_times():
     assert state["rv"] == "16e5431a"
 
 
-def test_compact_robot_state_flags_pending_update():
+def test_compact_robot_state_flags_differing_server_build():
     state = compact_robot_state({"rv": "7c5a29c", "sv": "16e5431"}, "Europe/Moscow")
     assert state["same_build"] is False
-    assert state["restart_updates_version"] is True
+    assert state["server_build_differs"] is True
 
 
 def test_compact_robot_state_without_versions_says_unknown():
     state = compact_robot_state({"rc": False}, "Europe/Moscow")
     assert state["same_build"] is None
-    assert state["restart_updates_version"] is None
+    assert state["server_build_differs"] is None
     assert "dt_iso" not in state
 
 
