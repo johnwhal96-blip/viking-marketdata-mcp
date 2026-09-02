@@ -10,8 +10,11 @@ from app.export_store import ExportedFile, ExportStore
 from app.response_v2 import (
     add_iso_times,
     compact_log,
+    compact_message,
+    compact_robot_state,
     envelope,
     portfolio_not_found,
+    same_build,
     sanitize_value,
 )
 from app.viking_client import VikingAPIError, VikingClient
@@ -137,6 +140,37 @@ class MarketDataService:
             returned_count=len(items),
             detail_source="robot.subscribe.value.re",
             per_portfolio_reads=0,
+        )
+
+    async def get_robot_status(
+        self,
+        *,
+        robot_id: str,
+        timezone: str = "Europe/Moscow",
+        raw: bool = False,
+    ) -> dict[str, Any]:
+        if not robot_id:
+            raise ValueError("robot_id must not be empty")
+        summary = await self.client.get_robot_portfolio_summary(robot_id=robot_id)
+        state = summary["robot_state"]
+        item = sanitize_value(state) if raw else compact_robot_state(state, timezone)
+        return envelope(
+            [item],
+            notes=[
+                "Robot-level state from robot.subscribe value; per-portfolio trading "
+                "status stays in get_robot_portfolio_trading_status.",
+                "same_build compares rv with sv by common prefix: Viking truncates the "
+                "two strings to different lengths for one build (api.md example: rv "
+                "'ec1d046c', sv 'ec1d046').",
+            ],
+            robot_id=robot_id,
+            connected=item.get("rc"),
+            robot_version=item.get("rv"),
+            server_version=item.get("sv"),
+            same_build=same_build(item.get("rv"), item.get("sv")),
+            timezone=timezone,
+            raw=raw,
+            detail_source="robot.subscribe.value",
         )
 
     async def subscribe_available_portfolios(self) -> dict[str, Any]:
@@ -317,6 +351,59 @@ class MarketDataService:
             notes=[] if items else ["Логов в запрошенном диапазоне нет."],
             robot_id=robot_id,
             verbosity=verbosity,
+        )
+        if raw:
+            response["raw_response"] = result
+        return response
+
+    async def get_messages_history(
+        self,
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        include_read: bool = False,
+        limit: int = 100,
+        timezone: str = "Europe/Moscow",
+        raw: bool = False,
+    ) -> dict[str, Any]:
+        """Platform messages (``messages.get_history``) for the account, newest first as Viking returns them.
+
+        These are the non-suppressible notifications shown in the web interface — planned robot
+        restarts, platform announcements. They are account-level, so there is no robot or portfolio
+        filter. ``dt`` is ``epoch_msec`` (unlike logs, which use ``epoch_nsec``).
+        """
+        mint_ms = self._to_epoch_ms(date_from, "date_from")
+        maxt_ms = self._to_epoch_ms(date_to, "date_to")
+        if mint_ms > maxt_ms:
+            raise ValueError("date_from must not be later than date_to")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be in range 1..100")
+        result = await self.client.get_messages_history(
+            mint_ms=mint_ms,
+            maxt_ms=maxt_ms,
+            read=include_read,
+            limit=limit,
+        )
+        messages = result["messages"]
+        items = [compact_message(item, timezone) for item in messages]
+        notes: list[str] = []
+        if not items:
+            notes.append(
+                "Сообщений в запрошенном диапазоне нет."
+                + ("" if include_read else " Прочитанные сообщения скрыты: include_read=false.")
+            )
+        response = envelope(
+            items,
+            data_status="ok" if items else "no_data_in_range",
+            truncated=len(messages) >= limit,
+            coverage={
+                "from": date_from.isoformat(),
+                "to": date_to.isoformat(),
+                "tz": timezone,
+            },
+            notes=notes,
+            include_read=include_read,
+            count_in_database=result.get("count"),
         )
         if raw:
             response["raw_response"] = result
